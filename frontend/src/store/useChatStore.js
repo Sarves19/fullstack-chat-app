@@ -33,6 +33,7 @@ export const useChatStore = create((set, get) => ({
       set({ isMessagesLoading: false });
     }
   },
+
   sendMessage: async (messageData) => {
     const { selectedUser, messages } = get();
     try {
@@ -40,6 +41,56 @@ export const useChatStore = create((set, get) => ({
       set({ messages: [...messages, res.data] });
     } catch (error) {
       toast.error(error.response.data.message);
+    }
+  },
+
+  markMessagesRead: async (userId) => {
+    try {
+      await axiosInstance.put(`/messages/read/${userId}`);
+      set({
+        messages: get().messages.map((msg) =>
+          msg.senderId === userId ? { ...msg, status: "read" } : msg
+        ),
+      });
+    } catch (error) {
+      console.log("Error marking messages as read:", error);
+    }
+  },
+
+  deleteMessage: async (messageId, deleteForEveryone) => {
+    try {
+      await axiosInstance.delete(`/messages/${messageId}`, {
+        data: { deleteForEveryone },
+      });
+
+      if (deleteForEveryone) {
+        set({
+          messages: get().messages.map((msg) =>
+            msg._id === messageId
+              ? { ...msg, text: "This message was deleted", image: null, deletedForEveryone: true }
+              : msg
+          ),
+        });
+      } else {
+        set({
+          messages: get().messages.filter((msg) => msg._id !== messageId),
+        });
+      }
+    } catch (error) {
+      toast.error("Failed to delete message");
+    }
+  },
+
+  reactToMessage: async (messageId, emoji) => {
+    try {
+      const res = await axiosInstance.put(`/messages/react/${messageId}`, { emoji });
+      set({
+        messages: get().messages.map((msg) =>
+          msg._id === messageId ? { ...msg, reactions: res.data.reactions } : msg
+        ),
+      });
+    } catch (error) {
+      toast.error("Failed to react to message");
     }
   },
 
@@ -52,9 +103,34 @@ export const useChatStore = create((set, get) => ({
     socket.on("newMessage", (newMessage) => {
       const isMessageSentFromSelectedUser = newMessage.senderId === selectedUser._id;
       if (!isMessageSentFromSelectedUser) return;
+      set({ messages: [...get().messages, newMessage] });
+    });
 
+    socket.on("messagesRead", ({ senderId }) => {
       set({
-        messages: [...get().messages, newMessage],
+        messages: get().messages.map((msg) =>
+          msg.receiverId === senderId ? { ...msg, status: "read" } : msg
+        ),
+      });
+    });
+
+    socket.on("messageDeleted", ({ messageId, deleteForEveryone }) => {
+      if (deleteForEveryone) {
+        set({
+          messages: get().messages.map((msg) =>
+            msg._id === messageId
+              ? { ...msg, text: "This message was deleted", image: null, deletedForEveryone: true }
+              : msg
+          ),
+        });
+      }
+    });
+
+    socket.on("messageReaction", ({ messageId, reactions }) => {
+      set({
+        messages: get().messages.map((msg) =>
+          msg._id === messageId ? { ...msg, reactions } : msg
+        ),
       });
     });
   },
@@ -62,6 +138,9 @@ export const useChatStore = create((set, get) => ({
   unsubscribeFromMessages: () => {
     const socket = useAuthStore.getState().socket;
     socket.off("newMessage");
+    socket.off("messagesRead");
+    socket.off("messageDeleted");
+    socket.off("messageReaction");
   },
 
   setSelectedUser: (selectedUser) => set({ selectedUser }),

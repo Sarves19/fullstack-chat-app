@@ -15,8 +15,7 @@ export function getReceiverSocketId(userId) {
   return userSocketMap[userId];
 }
 
-// used to store online users
-const userSocketMap = {}; // {userId: socketId}
+const userSocketMap = {};
 
 io.on("connection", (socket) => {
   console.log("A user connected", socket.id);
@@ -24,8 +23,39 @@ io.on("connection", (socket) => {
   const userId = socket.handshake.query.userId;
   if (userId) userSocketMap[userId] = socket.id;
 
-  // io.emit() is used to send events to all the connected clients
   io.emit("getOnlineUsers", Object.keys(userSocketMap));
+
+  // Mark messages as delivered
+  socket.on("markDelivered", ({ messageIds, senderId }) => {
+    const senderSocketId = userSocketMap[senderId];
+    if (senderSocketId) {
+      io.to(senderSocketId).emit("messagesDelivered", { messageIds });
+    }
+  });
+
+  // Mark messages as read
+  socket.on("markRead", ({ messageIds, senderId }) => {
+    const senderSocketId = userSocketMap[senderId];
+    if (senderSocketId) {
+      io.to(senderSocketId).emit("messagesRead", { messageIds });
+    }
+  });
+
+  // Typing indicator
+  socket.on("typing", ({ receiverId }) => {
+    const receiverSocketId = userSocketMap[receiverId];
+    if (receiverSocketId) {
+      io.to(receiverSocketId).emit("typing", { senderId: userId });
+    }
+  });
+
+  // Stop typing
+  socket.on("stopTyping", ({ receiverId }) => {
+    const receiverSocketId = userSocketMap[receiverId];
+    if (receiverSocketId) {
+      io.to(receiverSocketId).emit("stopTyping", { senderId: userId });
+    }
+  });
 
   socket.on("disconnect", () => {
     console.log("A user disconnected", socket.id);
